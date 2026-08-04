@@ -1,0 +1,10 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scraper = "0.19"
+ego-tree = "0.6"
+flate2 = "1"
+thiserror = "1"
