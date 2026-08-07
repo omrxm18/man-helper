@@ -6,8 +6,8 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use crossterm::{execute, queue};
-use manrender_core::{Block, DefItem, Document, Span as CoreSpan};
-use manrender_index::FlagEntry;
+use core::{Block, DefItem, Document, Span as CoreSpan};
+use index::FlagEntry;
 use std::collections::HashMap;
 use std::io::{self, Stdout, Write};
 
@@ -76,12 +76,12 @@ struct PageState {
 }
 
 impl PageState {
-    fn load(name: &str, section: Option<&str>, cols: u16) -> Result<Self, manrender_core::ManError> {
+    fn load(name: &str, section: Option<&str>, cols: u16) -> Result<Self, core::ManError> {
         let looks_like_path = name.contains('/') || std::path::Path::new(name).is_file();
         let doc = if looks_like_path {
-            manrender_core::load_from_path(std::path::Path::new(name))
+            core::load_from_path(std::path::Path::new(name))
         } else {
-            manrender_core::load(name, section)
+            core::load(name, section)
         }?;
 
         let title_bar = doc.title.clone();
@@ -193,19 +193,19 @@ fn flags_mode(query: &str) -> io::Result<()> {
         std::process::exit(1);
     }
 
-    let entries = match manrender_index::load_cached() {
+    let entries = match index::load_cached() {
         Some(e) => e,
         None => {
             eprintln!("No flag index yet -- building one now (first run only, this can take a moment)...");
             let entries = build_index_with_progress();
-            if let Err(e) = manrender_index::save_cache(&entries) {
+            if let Err(e) = index::save_cache(&entries) {
                 eprintln!("warning: couldn't save index cache: {e}");
             }
             entries
         }
     };
 
-    let results = manrender_index::search(&entries, query);
+    let results = index::search(&entries, query);
     if results.is_empty() {
         println!("No matches for \"{query}\".");
         println!("(Tip: run `manview rebuild-index` if you've installed new packages since the index was built.)");
@@ -247,18 +247,18 @@ fn print_flag_entry(i: usize, entry: &FlagEntry) {
 
 fn rebuild_index_mode() {
     let entries = build_index_with_progress();
-    match manrender_index::save_cache(&entries) {
-        Ok(()) => println!("Saved index to {}", manrender_index::cache_path().display()),
+    match index::save_cache(&entries) {
+        Ok(()) => println!("Saved index to {}", index::cache_path().display()),
         Err(e) => eprintln!("Failed to save index: {e}"),
     }
 }
 
 fn build_index_with_progress() -> Vec<FlagEntry> {
-    let pages = manrender_index::discover_pages();
+    let pages = index::discover_pages();
     let total = pages.len();
     eprintln!("Found {total} installed man pages.");
     let last_reported = std::sync::atomic::AtomicUsize::new(0);
-    let entries = manrender_index::build_index(&pages, |done, total| {
+    let entries = index::build_index(&pages, |done, total| {
         let prev = last_reported.swap(done, std::sync::atomic::Ordering::Relaxed);
         if done == total || done / 50 != prev / 50 {
             eprint!("\rIndexing... {done}/{total}");

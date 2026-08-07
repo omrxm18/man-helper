@@ -1,5 +1,5 @@
 use crate::finder::PageRef;
-use manrender_core::{Block, DefItem, Document, Span};
+use core::{Block, DefItem, Document, Span};
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc;
 use std::thread;
@@ -36,7 +36,7 @@ pub fn build_index(pages: &[PageRef], on_progress: impl Fn(usize, usize) + Send 
             scope.spawn(move || {
                 let mut local = Vec::new();
                 for page in chunk {
-                    if let Ok(doc) = manrender_core::load_from_path(&page.path) {
+                    if let Ok(doc) = core::load_from_path(&page.path) {
                         collect_flags(&doc, &page.name, &page.section, &mut local);
                     }
                     let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;

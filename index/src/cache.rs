@@ -10,7 +10,7 @@ pub fn cache_path() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."));
             home.join(".cache")
         });
-    base.join("manrender").join("flags_index.json")
+    base.join("manview").join("flags_index.json")
 }
 
 pub fn save(entries: &[FlagEntry]) -> std::io::Result<()> {
