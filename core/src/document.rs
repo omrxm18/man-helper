@@ -1,5 +1,5 @@
 //! The helper-agnostic representation of a parsed man page.
-//! TUI, HTML, and GUI helpers all consume this same structure.
+//! TUI, HTML, and GUI renderers all consume this same structure.
 
 #[derive(Debug, Clone, Default)]
 pub struct Document {
@@ -41,12 +41,20 @@ pub enum Span {
     Bold(String),
     Italic(String),
     Code(String),
+    /// A cross-reference to another man page, e.g. "ls(1)".
+    /// `name`/`section` are what gets passed to `load()` to follow it.
+    Link {
+        text: String,
+        name: String,
+        section: String,
+    },
 }
 
 impl Span {
     pub fn plain_text(&self) -> &str {
         match self {
             Span::Text(s) | Span::Bold(s) | Span::Italic(s) | Span::Code(s) => s,
+            Span::Link { text, .. } => text,
         }
     }
 }

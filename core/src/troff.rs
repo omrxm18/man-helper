@@ -11,7 +11,11 @@ use std::process::{Command, Stdio};
 pub fn troff_to_html(source: &str) -> Result<String, ManError> {
     let mut child = Command::new("mandoc")
         .arg("-Thtml")
-        .arg("-Ofragment") // skip <html>/<head> boilerplate, just the body content
+        // fragment: skip <html>/<head> boilerplate, just the body content.
+        // man=%N.%S: ask mandoc to emit real <a class="Xr" href="name.section">
+        // links for Xr cross-references (e.g. "ls(1)") instead of plain text,
+        // so the TUI can let you jump straight to the referenced page.
+        .arg("-Ofragment,man=%N.%S")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
