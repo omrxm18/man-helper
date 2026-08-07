@@ -1,5 +1,7 @@
 use crate::document::{Block, DefItem, Document, Section, Span};
+use regex::Regex;
 use scraper::{ElementRef, Html, Node, Selector};
+use std::sync::OnceLock;
 
 pub fn parse_document(html: &str) -> Document {
     let doc = Html::parse_fragment(html);
@@ -157,10 +159,108 @@ fn parse_deflist(dl: ElementRef) -> Vec<DefItem> {
 }
 
 /// Collect all descendant text/bold/italic/code content of a node into
-/// a flat list of inline spans, preserving basic emphasis.
+/// a flat list of inline spans, preserving basic emphasis and turning
+/// cross-references into followable Links.
 fn spans_from_node(node: ego_tree::NodeRef<Node>) -> Vec<Span> {
+    let mut raw = Vec::new();
+    collect_spans(node, &mut raw);
+    // Plain-text fallback: most Linux man pages are written with classic
+    // man(7) macros, not mdoc's semantic .Xr, so "ls(1)" in SEE ALSO often
+    // arrives as bare text rather than a real <a class="Xr">. Detect that
+    // pattern in any leftover Text spans and turn it into a Link too.
+    let split: Vec<Span> = raw
+        .into_iter()
+        .flat_map(|s| match s {
+            Span::Text(t) => split_xrefs(&t),
+            other => vec![other],
+        })
+        .collect();
+    // A second, extremely common GNU pattern: the command name is bolded
+    // and the "(1)" section marker is a separate adjacent plain-text node
+    // (e.g. `<b>dircolors</b>(1)`), so the pass above never sees them as
+    // one string. Merge that pattern into a Link here.
+    merge_bold_xrefs(split)
+}
+
+fn merge_bold_xrefs(spans: Vec<Span>) -> Vec<Span> {
+    let mut out = Vec::with_capacity(spans.len());
+    let mut iter = spans.into_iter().peekable();
+    while let Some(span) = iter.next() {
+        let name = match &span {
+            Span::Bold(t) | Span::Code(t) if is_xref_name(t) => Some(t.clone()),
+            _ => None,
+        };
+        if let Some(name) = name {
+            if let Some(Span::Text(next)) = iter.peek() {
+                if let Some((section, rest)) = strip_leading_section(next) {
+                    iter.next(); // consume the "(N)" text node
+                    out.push(Span::Link {
+                        text: format!("{name}({section})"),
+                        name,
+                        section,
+                    });
+                    if !rest.is_empty() {
+                        out.extend(split_xrefs(&rest));
+                    }
+                    continue;
+                }
+            }
+        }
+        out.push(span);
+    }
+    out
+}
+
+/// Is this bold/code text plausibly a command/page name (as opposed to,
+/// say, a flag like "-a" or an arbitrary bolded word)?
+fn is_xref_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+/// If `text` starts with (optionally, whitespace then) "(<section>)",
+/// return the section and whatever remains after it.
+fn strip_leading_section(text: &str) -> Option<(String, String)> {
+    let trimmed = text.trim_start_matches(' ');
+    let after_open = trimmed.strip_prefix('(')?;
+    let close = after_open.find(')')?;
+    let section = &after_open[..close];
+    let mut sec_chars = section.chars();
+    let starts_digit = matches!(sec_chars.next(), Some(c) if c.is_ascii_digit());
+    if !starts_digit || !sec_chars.all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some((section.to_string(), after_open[close + 1..].to_string()))
+}
+
+fn xref_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"([A-Za-z][A-Za-z0-9_.:+-]*)\((\d[A-Za-z]{0,3})\)").unwrap())
+}
+
+fn split_xrefs(text: &str) -> Vec<Span> {
+    let re = xref_regex();
     let mut out = Vec::new();
-    collect_spans(node, &mut out);
+    let mut last = 0;
+    for caps in re.captures_iter(text) {
+        let m = caps.get(0).unwrap();
+        if m.start() > last {
+            out.push(Span::Text(text[last..m.start()].to_string()));
+        }
+        out.push(Span::Link {
+            text: m.as_str().to_string(),
+            name: caps[1].to_string(),
+            section: caps[2].to_string(),
+        });
+        last = m.end();
+    }
+    if out.is_empty() {
+        return vec![Span::Text(text.to_string())];
+    }
+    if last < text.len() {
+        out.push(Span::Text(text[last..].to_string()));
+    }
     out
 }
 
@@ -175,7 +275,24 @@ fn collect_spans(node: ego_tree::NodeRef<Node>, out: &mut Vec<Span>) {
             }
             Node::Element(elem) => {
                 let tag = elem.name();
+                let class = elem.attr("class").unwrap_or("");
                 match tag {
+                    "a" if class.contains("Xr") => {
+                        if let Some((name, section)) = elem
+                            .attr("href")
+                            .and_then(|href| href.rsplit_once('.'))
+                            .map(|(n, s)| (n.to_string(), s.to_string()))
+                        {
+                            let text = collapse(&text_of(child));
+                            out.push(Span::Link {
+                                text,
+                                name,
+                                section,
+                            });
+                        } else {
+                            collect_spans(child, out);
+                        }
+                    }
                     "b" | "strong" => {
                         let t = collapse(&text_of(child));
                         if !t.is_empty() {
